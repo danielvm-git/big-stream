@@ -1,0 +1,29 @@
+project: big-stream
+phase: build # e01 built on feat/e01-walking-skeleton; next: release-branch e01, then e02 capture
+updated: 2026-06-12
+planning_artifacts:
+  scope: specs/requirements/SCOPE_LATEST.yaml
+  release_plan: specs/release-plan.yaml
+  epics: specs/epics/ (e01-e10, 68 stories, all with verify commands)
+  glossary: specs/UBIQUITOUS_LANGUAGE.md
+  adrs: specs/adr/ (ADR-0001..0004)
+decisions:
+  - product: B2C macOS streaming studio for solo dev coding streams; wedge = idiot-proof UX (go live in 60s, no stream keys)
+  - architecture: client-side composite+encode, zero servers; OBS rejected as basis (ADR-0001)
+  - foundation: HaishinKit 2.2.x pinned, behind StreamEngine actor protocol (ADR-0002)
+  - destinations: YouTube OAuth (PKCE) first, custom RTMP escape hatch; Twitch post-1.0 (ADR-0003)
+  - distribution: notarized DMG, no sandbox; free beta -> paid later; macOS 14+; local-only telemetry (ADR-0004)
+  - scope: one fixed layout (screen + camera bubble) until 1.0.0
+  - releases: semantic-release, Conventional Commits, ladder 0.1.0 -> 1.0.0 (see release ladder below; formalize via plan-release)
+release_ladder:
+  - {version: 0.1.0, slice: walking skeleton — XcodeGen, AppState, JSONLogger, Swift Testing, CI + semantic-release + hooks}
+  - {version: 0.2.0, slice: capture — SCK screen/window picker, camera, mic, live preview}
+  - {version: 0.3.0, slice: compositor — screen + draggable camera bubble, golden-frame tests}
+  - {version: 0.4.0, slice: StreamEngine — HaishinKit publish to custom RTMP, MediaMTX integration tests; start Google OAuth verification in parallel}
+  - {version: 0.5.0, slice: recording — StreamRecorder second output, ffprobe drift assertions}
+  - {version: 0.6.0, slice: YouTube OAuth — broadcast lifecycle, no visible stream keys}
+  - {version: 0.7.0, slice: Go Live UX — one-button flow, live HUD, end -> VOD}
+  - {version: 0.8.0, slice: resilience — reconnect, adaptive bitrate, settings persistence}
+  - {version: 0.9.0, slice: polish — onboarding, permissions flow, signed+notarized DMG}
+  - {version: 1.0.0, slice: MVP — docs, landing page, dogfood stream}
+next: scope-work (specs/requirements/SCOPE_LATEST.yaml), then plan-release

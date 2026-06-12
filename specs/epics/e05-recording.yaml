@@ -1,0 +1,92 @@
+id: e05
+name: recording
+version: 0.5.0
+goal: Deliver local MP4 recording via HaishinKit StreamRecorder as a second MediaMixer output, sharing the same
+  composite as publish, with a record-only mode, recordings folder management, and ffprobe-verified A/V quality
+  assertions.
+wsjf:
+  business_value: 8
+  time_criticality: 6
+  risk_reduction: 7
+  job_size: 5
+  score: 4.2
+dependencies:
+- e04
+stories:
+- id: e05-s01
+  title: Attach StreamRecorder to MediaMixer as second output
+  acceptance_criteria:
+  - Given StreamEngine is initialized, When startRecording() is called, Then a StreamRecorder instance is created
+    and added via mixer.addOutput(recorder)
+  - Given StreamRecorder is attached, When composited CMSampleBuffers are appended to the mixer, Then StreamRecorder
+    receives the same frames as the RTMP stream output
+  - Given stopRecording() is called, Then StreamRecorder is removed from mixer outputs and the MP4 file is finalized
+    without data loss
+  verify: 'manual: start a session with recording enabled, stop after 10s, confirm MP4 exists in recordings folder
+    and is playable'
+- id: e05-s02
+  title: Record-only mode with no RTMP destination
+  acceptance_criteria:
+  - Given a Session has no YouTubeDestination and no CustomRTMPDestination configured, When the user starts recording,
+    Then StreamEngine starts StreamRecorder without attempting any RTMP connection
+  - Given record-only mode is active, When AppState.sessionState is observed, Then it reflects .recording and not
+    .live
+  - Given record-only mode, When stopRecording() is called, Then the session ends cleanly with no RTMP teardown
+    errors logged
+  verify: swift test --filter RecordOnlyModeTests
+- id: e05-s03
+  title: Recordings folder management and metadata persistence
+  acceptance_criteria:
+  - Given the app launches for the first time, When recordings folder is not present, Then it is created at ~/Movies/BigStream/Recordings/
+  - 'Given a recording completes, When the file is finalized, Then a sidecar JSON file is written alongside the
+    MP4 containing: filename, duration, startDate, showName'
+  - Given the recordings list view is opened, When recordings are present, Then they are listed sorted by startDate
+    descending with duration and show name displayed
+  - Given a recording entry, When the user deletes it, Then both the MP4 and sidecar JSON are removed from disk
+  verify: swift test --filter RecordingsFolderTests
+- id: e05-s04
+  title: 'ffprobe integration test: duration tolerance on 10s synthetic A/V'
+  acceptance_criteria:
+  - Given a synthetic 10-second session is recorded using a mock CaptureService emitting timed CMSampleBuffers,
+    When the MP4 is finalized, Then ffprobe reports a duration between 9.9s and 10.1s
+  - Given the ffprobe duration assertion runs in CI, When the tolerance is exceeded, Then the test fails with the
+    actual duration logged
+  verify: swift test --filter RecordingDurationTests
+- id: e05-s05
+  title: 'ffprobe integration test: A/V PTS drift < 50ms'
+  acceptance_criteria:
+  - Given a 10-second synthetic recording with mic audio on track 0 and system audio on track 1, When ffprobe extracts
+    audio and video PTS streams, Then the maximum drift between any audio PTS and the nearest video PTS is less
+    than 50ms
+  - Given multiTrackAudioMixingEnabled is true, When the recording is probed, Then two audio streams are present
+    in the MP4 container
+  verify: swift test --filter AVPTSDriftTests
+- id: e05-s06
+  title: 'ffprobe integration test: no frame gaps in video stream'
+  acceptance_criteria:
+  - Given a 10-second synthetic recording, When ffprobe packet analysis is run on the video stream, Then no inter-frame
+    gap exceeds 1.5x the nominal frame duration (e.g. > 50ms at 30fps)
+  - Given SCK emits .idle or .blank frames, When the Compositor filters them before appending to mixer, Then the
+    recording contains no corresponding dropped-frame gaps
+  verify: swift test --filter FrameGapTests
+- id: e05-s07
+  title: RecordingIndicator UI and start/stop controls
+  acceptance_criteria:
+  - Given a Session is active in record-only mode, When viewed in the session toolbar, Then a red pulsing REC indicator
+    and elapsed time counter are visible
+  - Given a Session is live with recording enabled, When viewed in the session toolbar, Then both a LIVE badge and
+    a REC indicator are visible simultaneously
+  - Given the user clicks Stop Recording, When the action is confirmed, Then AppState transitions to idle and the
+    new recording appears at the top of the recordings list within 2 seconds
+  verify: 'manual: verify-work checklist — launch app, start record-only session, confirm REC indicator pulses,
+    stop after 15s, confirm recording appears in list'
+risks:
+- StreamRecorder MP4 finalization may silently drop the last GOP if stopRecording() races with an in-flight mixer
+  append — requires explicit flush/drain before removal
+- ffprobe availability in CI must be guaranteed via Homebrew or Docker image; tests must skip gracefully if ffprobe
+  is absent rather than false-passing
+- SCK idle/blank frame filtering (introduced in e04) must be verified to not introduce discontinuous PTS gaps that
+  defeat the < 50ms drift assertion
+- record-only mode bypasses RTMP entirely but StreamEngine actor must not hold an implicit RTMPStream reference
+  that causes unexpected connection attempts on init
+status: planned

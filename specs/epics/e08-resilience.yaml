@@ -1,0 +1,106 @@
+id: e08
+name: resilience
+version: 0.8.0
+goal: 'A live Session survives transient network and destination failures without losing the local Recording: StreamSession
+  reconnects with bounded backoff, the encoder adapts bitrate to available bandwidth, a circuit breaker stops publishing
+  to a repeatedly-failing Destination while the Recording keeps running, the UI surfaces a degraded state, Show
+  and app settings persist durably with corruption recovery, and stream-health telemetry (dropped frames, reconnects,
+  encode latency) is logged and exportable as a diagnostics bundle.'
+dependencies:
+- e07
+wsjf:
+  business_value: 8
+  time_criticality: 6
+  risk_reduction: 9
+  job_size: 5
+  score: 4.6
+risks:
+- StreamSession.setMaxRetryCount semantics differ from our policy expectations; a HaishinKit-internal retry loop
+  may double-count against our own backoff and cause storms — verify readyState AsyncStream transitions against
+  MediaMTX before layering policy
+- StreamVideoAdaptiveBitRateStrategy ships the real API typo 'mamimumVideoBitrate'; mis-binding it silently disables
+  the bitrate cap — assert the configured ceiling is actually honored via ffprobe/MediaMTX-side bitrate observation
+- Circuit-breaker must stop ONLY the publish path while StreamRecorder (second MediaMixerOutput) continues; tearing
+  down the wrong mixer output kills the Recording — golden requirement is recording continuity across a publish
+  trip
+- Encode-latency and dropped-frame telemetry must derive from CMSampleBuffer PTS, not wall clock, or numbers drift
+  under load and mislead diagnostics
+- SettingsStore .corrupted backup-and-reset must never throw into the live Session path; a corrupt Show on launch
+  must degrade to defaults, not crash mid-stream
+- 'Network-pull manual test depends on local interface manipulation (e.g. pfctl / Network Link Conditioner) which
+  is environment-specific and cannot run in CI — kept as manual: verify'
+stories:
+- id: e08-s01
+  title: Reconnect policy with bounded exponential backoff over StreamSession
+  acceptance_criteria:
+  - Given a publishing Session and a dropped RTMP connection, When StreamSession.readyState reports disconnection,
+    Then ReconnectPolicy retries with exponential backoff (base 1s, factor 2, jitter, cap 30s) up to a configured
+    max attempts and the Session returns to publishing without operator action
+  - Given backoff is exhausted, When max attempts are reached, Then the Session transitions to a terminal degraded
+    state and emits a reconnect-exhausted telemetry event rather than retrying forever
+  - Given HaishinKit's own setMaxRetryCount, When our ReconnectPolicy is active, Then setMaxRetryCount is set to
+    0 so our policy is the single source of retry truth (no double retry loop)
+  verify: swift test --filter ReconnectPolicyTests
+- id: e08-s02
+  title: Adaptive bitrate via StreamVideoAdaptiveBitRateStrategy with honored ceiling
+  acceptance_criteria:
+  - Given a Session publishing to MediaMTX, When available bandwidth drops, Then StreamVideoAdaptiveBitRateStrategy
+    lowers the encode bitrate and the configured maximum ceiling (bound to the real 'mamimumVideoBitrate' API field)
+    is never exceeded
+  - Given bandwidth recovers, When headroom returns, Then bitrate ramps back up toward the configured ceiling
+  - Given the strategy is configured, When the Session starts, Then the effective ceiling is asserted server-side
+    (MediaMTX/ffprobe observed bitrate <= ceiling within tolerance)
+  verify: swift test --filter AdaptiveBitRateIntegrationTests
+- id: e08-s03
+  title: Circuit breaker stops publish on repeated Destination failures while Recording continues
+  acceptance_criteria:
+  - Given a Destination that fails repeatedly, When the failure count crosses the breaker threshold within the window,
+    Then the breaker opens, the publish path stops, and no further reconnect attempts are made until reset
+  - Given the breaker is open, When publish has stopped, Then the StreamRecorder MediaMixerOutput keeps recording
+    the composite uninterrupted and the resulting Recording file remains continuous (no gap, A/V PTS drift < 50ms
+    across the trip)
+  - Given the breaker opens, When state changes, Then AppState exposes a degraded publish state and a degraded-state
+    telemetry event is logged
+  verify: swift test --filter CircuitBreakerTests && swift test --filter RecordingContinuityTests
+- id: e08-s04
+  title: UI surfaces degraded Session state in the live HUD
+  acceptance_criteria:
+  - Given the breaker is open or reconnect is in progress, When AppState publishes a degraded state, Then the live
+    HUD shows a distinct degraded indicator (reconnecting vs publish-stopped-recording-continues) without obscuring
+    the preview
+  - Given the Session recovers, When publishing resumes, Then the HUD returns to the normal live indicator
+  - Given Recording continues while publish is stopped, When the user views the HUD, Then it clearly communicates
+    that recording is still running
+  verify: 'manual: Go Live to MediaMTX, pull network, observe HUD shows reconnecting then publish-stopped+recording-continues;
+    restore network, confirm HUD returns to normal'
+- id: e08-s05
+  title: SettingsStore JSON persistence with .corrupted backup-and-reset recovery
+  acceptance_criteria:
+  - Given a Show and app settings, When they are saved, Then they persist as JSON via SettingsStore and reload identically
+    on next launch
+  - Given a corrupt settings JSON file on launch, When SettingsStore decodes it, Then it moves the bad file aside
+    as <name>.corrupted, loads defaults, logs the recovery, and never throws into the Session path
+  - Given persistence runs, When the live Session is active, Then save/load never blocks or crashes the publish/record
+    pipeline
+  verify: swift test --filter SettingsStoreTests
+- id: e08-s06
+  title: Stream-health telemetry events in JSONLogger (dropped frames, reconnects, encode latency)
+  acceptance_criteria:
+  - Given an active Session, When frames are dropped, reconnects occur, or encode latency is measured, Then JSONLogger
+    emits structured stream-health events with PTS-derived timing (not wall clock)
+  - Given the events, When inspected, Then each carries a stable event type, the Session id, and numeric metrics
+    suitable for later aggregation
+  - Given local-only telemetry policy, When events are written, Then they go only to the local JSONLogger sink with
+    no network egress
+  verify: swift test --filter StreamHealthTelemetryTests
+- id: e08-s07
+  title: Export diagnostics bundle from local telemetry logs
+  acceptance_criteria:
+  - Given local JSONLogger telemetry, When the user invokes Export diagnostics, Then a single bundle is produced
+    containing the structured logs and the stream-health events for recent Sessions
+  - Given the bundle, When inspected, Then it is local-only and contains no OAuth tokens or stream keys
+  - Given a network-pull scenario, When the manual test script degrades the link during a Session, Then the resulting
+    diagnostics bundle shows the reconnect, adaptive-bitrate, and breaker events for that run
+  verify: 'swift test --filter DiagnosticsExportTests; manual: run scripts/network-pull.sh against a live MediaMTX
+    Session, then Export diagnostics and confirm reconnect/bitrate/breaker events are present'
+status: planned

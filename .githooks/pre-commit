@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# pre-commit hook: Run SwiftLint and tests (if project exists)
+
+set -e
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+cd "$PROJECT_ROOT" || exit 1
+
+# Run SwiftLint
+echo "[pre-commit] Running SwiftLint..."
+if ! swiftlint lint --strict --quiet; then
+    echo "[pre-commit] FAILED: swiftlint found violations" >&2
+    exit 1
+fi
+
+# Check if Xcode project exists and run tests if it does
+if [ -d "BigStream.xcodeproj" ]; then
+    echo "[pre-commit] Running tests..."
+    if ! xcodebuild test -scheme BigStream -destination 'platform=macOS' -quiet; then
+        echo "[pre-commit] FAILED: tests did not pass" >&2
+        exit 1
+    fi
+else
+    echo "[pre-commit] tests skipped (no project yet)"
+fi
+
+exit 0

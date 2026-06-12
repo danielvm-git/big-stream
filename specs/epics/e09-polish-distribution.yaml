@@ -1,0 +1,118 @@
+id: e09
+name: polish-distribution
+version: 0.9.0
+goal: Ship a notarized, installer-ready BigStream DMG with a first-run onboarding walkthrough, Developer ID signing,
+  and a lightweight update-check link — so a stranger can download, install, grant permissions, and go live without
+  any guidance.
+wsjf:
+  business_value: 9
+  time_criticality: 8
+  risk_reduction: 7
+  job_size: 7
+  score: 3.43
+dependencies:
+- e08
+stories:
+- id: e09-s01
+  title: App icon, display name, and bundle identity
+  acceptance_criteria:
+  - Given the Xcode project, when built, then CFBundleName is 'BigStream' and CFBundleDisplayName is 'BigStream'
+    in the Info.plist.
+  - Given the asset catalogue, when inspected, then AppIcon contains all required macOS sizes (16x16 through 1024x1024
+    @1x/@2x) with no missing slots reported by xcodebuild.
+  - Given the built .app, when the Finder icon is viewed at 512px, then it renders without a generic placeholder.
+  verify: 'xcodebuild -scheme BigStream -configuration Release build 2>&1 | grep -E ''warning.*missing.*icon|error''
+    | grep -v ''^$'' && echo ''PASS: no missing icon warnings'''
+- id: e09-s02
+  title: Developer ID code signing and hardened runtime entitlements
+  acceptance_criteria:
+  - Given DEVELOPER_ID_APPLICATION is set in CI environment, when xcodebuild archive runs, then the .app is signed
+    with Developer ID Application identity.
+  - Given the signed .app, when 'codesign --verify --deep --strict' runs, then it exits 0.
+  - Given the entitlements file, when inspected, then com.apple.security.cs.allow-jit is absent, hardened runtime
+    is enabled, and only required entitlements (screen capture, camera, microphone, network client, app-sandbox
+    disabled for RTMP) are present.
+  - Given the signed binary, when 'spctl --assess --type execute' runs on macOS 14+, then it exits 0 after notarization.
+  verify: codesign --verify --deep --strict --verbose=2 build/BigStream.app 2>&1 | tail -1 | grep -q 'satisfies
+    its Designated Requirement' && echo PASS
+- id: e09-s03
+  title: Notarized DMG CI pipeline
+  acceptance_criteria:
+  - 'Given a GitHub Actions workflow ''release.yml'', when a tag matching ''v*'' is pushed, then it runs: xcodebuild
+    archive, codesign, xcrun notarytool submit --wait, xcrun stapler staple, create-dmg, and uploads the .dmg as
+    a release asset.'
+  - Given the stapled .dmg, when 'spctl --assess --type open --context context:primary-signature' runs, then it
+    exits 0.
+  - Given the pipeline, when NOTARYTOOL_APPLE_ID, NOTARYTOOL_TEAM_ID, NOTARYTOOL_PASSWORD secrets are absent, then
+    the pipeline fails fast with a human-readable error before attempting submission.
+  - Given the DMG, when mounted on a clean macOS 14 VM, then drag-to-Applications installs without Gatekeeper quarantine
+    dialogs.
+  verify: 'manual: mount the latest CI-produced .dmg on a clean macOS 14 VM that has never run BigStream; drag to
+    /Applications; double-click; confirm Gatekeeper shows no quarantine warning and app opens to first-run onboarding'
+- id: e09-s04
+  title: First-run onboarding walkthrough — permissions
+  acceptance_criteria:
+  - Given a fresh install with no prior permissions granted, when BigStream launches, then an OnboardingView is
+    presented modally before any other UI.
+  - 'Given the OnboardingView, when displayed, then it shows at minimum three steps: Welcome, Screen Recording permission
+    (with a ''Grant Access'' button that calls CGRequestPostEventAccess or opens System Settings), and Camera/Microphone
+    permission.'
+  - Given all permissions are granted, when OnboardingView's final step is confirmed, then AppState.onboardingComplete
+    is set true, persisted to UserDefaults, and the main studio window is shown.
+  - Given AppState.onboardingComplete is already true on subsequent launches, when the app opens, then OnboardingView
+    is not shown.
+  - Given the onboarding flow, when unit tested with a stub PermissionChecker, then OnboardingViewModel transitions
+    through all states without calling real system APIs.
+  verify: swift test --filter OnboardingViewModelTests 2>&1 | grep -E 'Test run|passed|failed'
+- id: e09-s05
+  title: First-run onboarding walkthrough — show setup
+  acceptance_criteria:
+  - Given onboarding permissions are complete, when the setup step is shown, then the user can enter a Show title
+    and optionally an RTMP destination or YouTube account link.
+  - Given the user skips the setup step, when the main window opens, then a Show with default title 'My Stream'
+    is created and the user can edit it later.
+  - Given the user completes show setup, when the main window opens, then ShowState reflects the entered title and
+    destination.
+  - Given the onboarding flow, when a SwiftUI preview is rendered, then each step renders without runtime errors
+    in Xcode previews.
+  verify: 'manual: run app on a simulator or device with UserDefaults cleared (defaults delete com.bigstream.BigStream);
+    confirm onboarding presents, walk through all steps, confirm main window opens with correct Show title'
+- id: e09-s06
+  title: In-app update check link
+  acceptance_criteria:
+  - Given the app menu (BigStream > Check for Updates), when selected, then it opens 'https://bigstream.app/releases'
+    in the default browser via NSWorkspace.shared.open.
+  - Given no network connection, when 'Check for Updates' is selected, then the browser opens (or fails gracefully)
+    — no crash, no blocking alert.
+  - Given the implementation, when reviewed, then there is no Sparkle framework dependency and no background network
+    polling; the check is entirely user-initiated.
+  - Given the menu item, when the app is sandboxed or hardened, then com.apple.security.network.client entitlement
+    is confirmed present to allow the URL open.
+  verify: grep -r 'Check for Updates' /Users/danielvm/Developer/big-stream --include='*.swift' | grep -q 'NSWorkspace'
+    && echo PASS || echo FAIL
+- id: e09-s07
+  title: Install-by-a-stranger manual acceptance test
+  acceptance_criteria:
+  - Given a tester who has never seen BigStream, when they receive only the .dmg download link and no verbal instructions,
+    then they can install, complete onboarding, configure a Show, and reach the 'Go Live' button within 10 minutes.
+  - Given the tester grants screen recording permission, when System Settings reopens the app after permission grant,
+    then the onboarding step auto-advances without requiring a manual tap.
+  - Given the tester's machine has no prior YouTube login, when they reach the destination step, then the OAuth
+    PKCE flow opens in the browser and returns them to the app.
+  - Given the completed session, when the tester is asked 'what does this app do?', then they can correctly describe
+    it as a live streaming tool for coding streams.
+  verify: 'manual: recruit one tester unfamiliar with BigStream; share only the DMG URL; observe without assistance;
+    record pass/fail for each acceptance criterion above; file issues for any criterion that fails'
+risks:
+- Developer ID certificate and notarytool credentials must be stored as GitHub Actions secrets before the DMG pipeline
+  can run; if the Apple Developer account is not enrolled in the team program, notarization is blocked entirely.
+- Screen Recording permission on macOS 14+ requires the app to be relaunched after the user grants access in System
+  Settings; the onboarding flow must handle this relaunch gracefully or it will appear broken to new users.
+- Hardened runtime restrictions may conflict with HaishinKit's use of certain video toolbox or network APIs at runtime;
+  entitlement gaps will surface only during notarization or first run on a clean machine, not during development.
+- create-dmg and xcrun notarytool submission times are variable (notarization can take 5-15 minutes); CI pipeline
+  timeout values must be set conservatively to avoid false failures on slow Apple notary queues.
+- Skipping Sparkle in v0.9 means users on older versions receive no automatic update nudge; the 'Check for Updates'
+  link depends on users discovering the menu item, which reduces upgrade adoption until Sparkle is added in a later
+  epic.
+status: planned

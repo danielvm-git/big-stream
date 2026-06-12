@@ -1,0 +1,111 @@
+id: e07
+name: golive-ux
+version: 0.7.0
+goal: 'Deliver a 60-second idiot-proof Go Live flow: Show setup persisted to disk, a single Go Live button that
+  orchestrates YouTubeService + StreamEngine + Recorder in sequence, a live HUD showing bitrate/fps/dropped frames/duration,
+  and an End flow that stops publish, finalizes the Recording, triggers VOD publish, and surfaces a session summary.
+  All error states shown in plain language with a single recovery action.'
+wsjf:
+  business_value: 10
+  time_criticality: 9
+  risk_reduction: 7
+  job_size: 7
+  score: 3.71
+dependencies:
+- e05
+- e06
+stories:
+- id: e07-s01
+  title: Persist and restore Show setup via JSONEncoder to ~/Library/Application Support/BigStream/shows/
+  acceptance_criteria:
+  - Given the user configures a Show (title, destination, capture sources), When the app relaunches, Then the Show
+    is restored from disk with all fields intact
+  - Given a Show file is corrupt or missing, When the app launches, Then a blank default Show is created without
+    crashing
+  - Given multiple Shows exist on disk, When the user opens the Show picker, Then all Shows are listed by last-modified
+    date descending
+  verify: 'manual: create a Show, force-quit the app via Activity Monitor, relaunch — confirm all fields pre-populated
+    within 3 seconds; also run: swift test --filter ShowPersistenceTests'
+- id: e07-s02
+  title: 'GoLiveButton orchestrator: sequential YouTubeService -> StreamEngine -> Recorder start with loading states'
+  acceptance_criteria:
+  - Given a valid Show with a YouTubeDestination, When the user taps Go Live, Then YouTubeService.createBroadcast
+    -> transitionToLive -> StreamEngine.start -> Recorder.start execute in order, each step reflected in AppState.sessionPhase
+  - Given StreamEngine.start throws, When the Go Live sequence is running, Then YouTubeService.stopBroadcast is
+    called for cleanup and the error is surfaced in plain language before returning to idle
+  - Given a CustomRTMPDestination Show, When the user taps Go Live, Then YouTubeService is bypassed and StreamEngine.start
+    -> Recorder.start run directly
+  - Given sessionPhase is .starting, When the Go Live button is rendered, Then it shows a ProgressView and is disabled
+    to prevent double-tap
+  verify: swift test --filter GoLiveOrchestratorTests
+- id: e07-s03
+  title: 'Live HUD overlay: bitrate, fps, dropped frames, elapsed duration updated every second via StreamEngine
+    stats AsyncStream'
+  acceptance_criteria:
+  - Given an active Session, When the HUD is visible, Then bitrate (kbps), fps, dropped-frame count, and hh:mm:ss
+    duration update at most every 1 second
+  - Given dropped frames exceed 5% of total frames in the last 10 seconds, When the HUD renders, Then the dropped-frame
+    counter turns red
+  - Given the Session ends, When the HUD is dismissed, Then all counters reset to zero for the next Session
+  verify: 'manual: start a stream to MediaMTX docker sink, confirm HUD values update live and match ffprobe -v quiet
+    -print_format json -show_streams output for the ingest; also run: swift test --filter LiveHUDViewModelTests'
+- id: e07-s04
+  title: 'End Session flow: stop publish, finalize Recording file, enqueue VOD upload via YouTubeService'
+  acceptance_criteria:
+  - Given an active Session, When the user taps End, Then a confirmation sheet appears before any destructive action
+  - Given the user confirms End, When the flow executes, Then StreamEngine.stop -> Recorder.finalize -> YouTubeService.uploadVOD
+    run in order; AppState.sessionPhase transitions .stopping -> .idle
+  - Given Recorder.finalize produces a file, When ffprobe runs on it, Then duration matches elapsed HUD time within
+    2 seconds and A/V PTS drift is less than 50 ms
+  - Given YouTubeService.uploadVOD fails (network error), When the End flow completes, Then the Recording file path
+    is preserved and a retry action is shown in the session summary
+  verify: swift test --filter EndSessionFlowTests && ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1
+    "$(ls -t ~/Movies/BigStream/*.mp4 | head -1)"
+- id: e07-s05
+  title: 'Session summary sheet: VOD link, recording path, peak bitrate, total dropped frames, duration'
+  acceptance_criteria:
+  - 'Given the End flow completes successfully, When the summary sheet appears, Then it displays: VOD URL (tappable),
+    local recording file path (reveal-in-Finder button), peak bitrate, total dropped frames, and total duration'
+  - Given the VOD upload is still in progress, When the summary sheet is shown, Then the VOD URL row shows an inline
+    ProgressView and updates to the link when upload completes
+  - Given the user taps Done on the summary sheet, When the sheet dismisses, Then AppState.sessionPhase is .idle
+    and the Go Live button is re-enabled
+  verify: 'manual: complete a full Session, confirm summary sheet fields are populated and VOD link opens in browser'
+- id: e07-s06
+  title: Plain-language error states with single recovery action for all Go Live failure modes
+  acceptance_criteria:
+  - Given any error thrown during GoLiveOrchestrator, When the error is surfaced in the UI, Then the message contains
+    no raw Swift error types, domain codes, or stack traces — only a human sentence and one labelled action button
+  - Given a YouTube auth token is expired, When the user taps Go Live, Then the error reads 'Your YouTube account
+    needs to be reconnected' with a 'Reconnect' button that opens YouTubeService OAuth flow
+  - Given RTMP connection is refused (MediaMTX not running), When the user taps Go Live, Then the error reads 'Could
+    not reach the streaming server — check the RTMP URL and your network' with a 'Edit Destination' button
+  - Given the error sheet is dismissed, When AppState.sessionPhase is read, Then it equals .idle
+  verify: swift test --filter GoLiveErrorPresentationTests
+- id: e07-s07
+  title: '60-second UX stopwatch: end-to-end manual checklist from cold second-run launch to stream confirmed live'
+  acceptance_criteria:
+  - Given BigStream has been launched at least once with a saved Show, When a stopwatch is started at app-foreground
+    and stopped when the HUD shows live bitrate above 0, Then elapsed time is under 60 seconds
+  - Given the verifier follows the printed checklist steps without reading any documentation, When they complete
+    the flow, Then no step requires more than one tap or one text field edit
+  - Given the session ends, When the summary sheet is dismissed, Then the app returns to the main window showing
+    the saved Show with no data loss
+  verify: 'manual: print CHECKLIST.md from docs/verify/e07-ux-checklist.md; perform two consecutive runs with a
+    physical stopwatch; record times in the checklist; both runs must be under 60 seconds; attach screenshot of
+    summary sheet to PR'
+risks:
+- 'YouTubeService OAuth PKCE round-trip and broadcast state machine (created -> ready -> live) adds latency to the
+  Go Live sequence that could exceed user expectations — mitigation: pre-warm the broadcast to ready state in background
+  when the Show is opened'
+- HaishinKit StreamSession readyState AsyncStream may not emit a .publishing event before the first stats tick,
+  causing HUD to show zeros for several seconds — must gate HUD display on first non-zero bitrate sample
+- 'Recorder.finalize is async file I/O; if the app is backgrounded or force-quit during End flow the MP4 may be
+  unclosed — mitigation: write moov atom incrementally (fragmented MP4) or use AVAssetWriter with explicit finishWriting'
+- VOD upload file sizes for a 1-hour stream can exceed 10 GB; YouTube resumable upload must handle suspension/resumption
+  across app restarts — out of scope for e07, but the error-state retry path must preserve the file path for a future
+  epic
+- Swift 6 strict concurrency requires all AppState mutations on @MainActor; the orchestrator async chain spans multiple
+  actor contexts (YouTubeService, StreamEngine) — incorrect await hops will produce data-race warnings that fail
+  CI
+status: planned

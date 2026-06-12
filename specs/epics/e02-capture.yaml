@@ -1,0 +1,115 @@
+id: e02
+name: capture
+version: 0.2.0
+goal: Implement CaptureService actor with SCContentSharingPicker for screen/window selection, AVCaptureDevice for
+  camera and mic, SCK system audio tap, a full permissions flow with graceful denial handling, and live SwiftUI
+  preview of raw sources — giving the app its first real A/V signal path.
+wsjf:
+  business_value: 9
+  time_criticality: 8
+  risk_reduction: 9
+  job_size: 7
+  score: 3.71
+dependencies:
+- e01
+stories:
+- id: e02-s01
+  title: 'PermissionsService: request and observe Screen Recording, Camera, and Mic authorizations with graceful
+    denial handling'
+  acceptance_criteria:
+  - Given the app launches for the first time, When PermissionsService.requestAll() is called, Then it requests
+    Screen Recording via SCShareableContent, Camera via AVCaptureDevice, and Mic via AVAudioApplication in sequence
+  - Given any permission is denied, When the denial is detected, Then PermissionsService publishes a PermissionState.denied(Permission)
+    value and no crash or silent failure occurs
+  - Given a denied permission, When the user navigates to the in-app permissions prompt, Then a Deep Link button
+    opens System Settings to the correct pane
+  - Given all permissions are granted, When PermissionsService.allGranted is observed, Then it returns true and
+    downstream services may proceed
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/PermissionsServiceTests
+- id: e02-s02
+  title: 'CaptureService actor skeleton: lifecycle (prepare/start/stop), owned sub-services, and AppState injection'
+  acceptance_criteria:
+  - Given AppState is initialised on the MainActor, When it creates CaptureService, Then the actor is isolated from
+    the main actor and holds owned references to sub-capture objects
+  - Given CaptureService.prepare() is called, When permissions are not yet granted, Then it throws CaptureError.permissionDenied
+    and leaves state as .idle
+  - Given CaptureService is in .running state, When stop() is called, Then all capture streams are torn down and
+    state transitions to .idle within 500 ms
+  - Given any internal capture error, When the error propagates, Then CaptureService publishes it via an AsyncStream<CaptureEvent>
+    consumed by AppState
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CaptureServiceLifecycleTests
+- id: e02-s03
+  title: 'Screen/window capture: SCContentSharingPicker integration producing CMSampleBuffer stream'
+  acceptance_criteria:
+  - Given Screen Recording permission is granted, When the user invokes CaptureService.presentScreenPicker(), Then
+    SCContentSharingPicker is presented and the selected SCDisplay or SCWindow is stored as the active screen source
+  - Given an active screen source, When CaptureService starts capture, Then SCStreamOutput delivers CMSampleBuffers
+    at the configured frame rate (default 30 fps) via an AsyncStream<CMSampleBuffer>
+  - Given SCK delivers a .idle or .blank sampleBuffer, When CaptureService receives it, Then the buffer is dropped
+    and not forwarded downstream
+  - Given the user dismisses the picker without selecting, When no source is chosen, Then CaptureService remains
+    in its previous state with no crash
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/ScreenCaptureTests
+- id: e02-s04
+  title: 'Camera capture: AVCaptureDevice session producing CMSampleBuffer stream with device enumeration'
+  acceptance_criteria:
+  - Given Camera permission is granted, When CaptureService.availableCameras is queried, Then it returns all AVCaptureDevice
+    video devices currently connected
+  - Given a selected camera device, When camera capture starts, Then an AVCaptureVideoDataOutput delivers CMSampleBuffers
+    on a dedicated serial queue exposed as an AsyncStream<CMSampleBuffer>
+  - Given no camera is available or permission is denied, When camera capture is requested, Then CaptureService
+    publishes CaptureEvent.cameraUnavailable and continues without crashing
+  - Given a camera is already running, When a different device is selected, Then the session is reconfigured atomically
+    (beginConfiguration/commitConfiguration) with no dropped frames on other sources
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CameraServiceTests
+- id: e02-s05
+  title: 'Audio capture: mic via AVCaptureDevice and system audio via SCK tap, dual-track output'
+  acceptance_criteria:
+  - Given Mic permission is granted, When audio capture starts, Then AVCaptureAudioDataOutput delivers mic CMSampleBuffers
+    tagged as track 0
+  - Given Screen Recording permission is granted, When system audio capture starts, Then SCStream with audio configuration
+    delivers system audio CMSampleBuffers tagged as track 1
+  - Given both audio sources are running, When CaptureService emits audio, Then mic and system audio are delivered
+    on separate AsyncStream<CMSampleBuffer> channels with monotonically increasing PTS
+  - Given mic permission is denied, When audio capture is started, Then system audio capture still starts successfully
+    and mic track emits no buffers
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/AudioCaptureTests
+- id: e02-s06
+  title: 'Live source preview: SwiftUI views displaying raw screen, camera, and audio level meter'
+  acceptance_criteria:
+  - Given CaptureService is running with a screen source selected, When ScreenPreviewView is displayed, Then it
+    renders the live SCK frame stream at native SwiftUI layer rate using a Metal-backed view or SampleBufferDisplayLayer
+  - Given CaptureService is running with a camera selected, When CameraPreviewView is displayed, Then it renders
+    the live camera feed inside a fixed-aspect-ratio container
+  - Given audio capture is running, When AudioLevelView is displayed, Then it shows a real-time dB meter updating
+    at least 10 times per second driven by AVAudioPCMBuffer peak amplitude
+  - Given no source is selected or capture is stopped, When any preview view is displayed, Then it shows a placeholder
+    (dark background + icon) with no crash
+  verify: 'manual: launch app in simulator or device, grant all permissions, confirm screen/camera previews render
+    and audio meter moves; xcodebuild test -scheme BigStream -only-testing BigStreamTests/PreviewViewTests for placeholder
+    states'
+- id: e02-s07
+  title: 'Permissions onboarding UI: step-by-step sheet guiding user through all three permission grants'
+  acceptance_criteria:
+  - Given the app launches and PermissionsService.allGranted is false, When AppState detects missing permissions,
+    Then a modal onboarding sheet is presented automatically
+  - Given the onboarding sheet is open, When the user taps 'Grant Screen Recording', Then the sheet calls PermissionsService.requestScreenRecording()
+    and updates the step indicator on return
+  - Given all three permissions are granted during onboarding, When allGranted becomes true, Then the sheet dismisses
+    automatically and CaptureService.prepare() is called
+  - Given the user dismisses the sheet with permissions still missing, When the sheet is closed, Then AppState surfaces
+    a persistent toolbar badge indicating incomplete permissions
+  verify: 'manual: run app on macOS 14+ device with no prior permissions; verify sheet appears, each grant step
+    updates UI, sheet auto-dismisses when all granted; confirm badge appears on partial grant'
+risks:
+- 'SCContentSharingPicker is macOS 14+ only; any CI runner on an older OS will silently skip or crash SCK-dependent
+  tests — pin minimum deployment target and guard tests with #available(macOS 14, *).'
+- AVCaptureSession reconfiguration while SCK is also running system audio can cause audio glitches or session interruptions
+  on some hardware; atomic beginConfiguration/commitConfiguration and separate dispatch queues are required.
+- SCK .idle/.blank frame filtering must be done before any downstream append; missing this causes HaishinKit passthrough
+  mode to stall on duplicate timestamps (gotcha from HaishinKit source review).
+- Screen Recording permission entails a TCC prompt that cannot be unit-tested on CI without a provisioned machine;
+  MediaMTX integration tests and manual verify-work checklists are the safety net.
+- Swift 6 strict concurrency requires all CMSampleBuffer hand-offs across actor boundaries to be Sendable-safe;
+  unsafe bridging of CVPixelBuffer will produce compile errors that must be resolved before merge.
+status: planned

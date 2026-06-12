@@ -1,0 +1,109 @@
+id: e10
+name: mvp-release
+version: 1.0.0
+goal: 'Complete and ship BigStream 1.0.0: comprehensive user documentation, static landing page, full test suite
+  verification, manual smoke testing against live YouTube, and dogfood announcement via a coding stream produced
+  entirely with BigStream itself.'
+wsjf:
+  business_value: 10
+  time_criticality: 9
+  risk_reduction: 8
+  job_size: 7
+  score: 3.86
+dependencies:
+- e09
+stories:
+- id: e10-s01
+  title: Author README and core user documentation
+  acceptance_criteria:
+  - Given a user with zero prior BigStream experience, When they open README.md, Then they understand the product,
+    installation, quick-start (Go Live in 60s), and feature set
+  - When a user encounters an error or question, Then they can find troubleshooting and FAQ sections
+  - When a developer wants to contribute, Then CONTRIBUTING.md explains branching, testing, and release process
+  - When a user needs to report a bug or request a feature, Then SECURITY.md and issue templates are present and
+    linked
+  verify: ls -1 {README,CONTRIBUTING,FAQ,SECURITY,TROUBLESHOOTING}.md 2>/dev/null && wc -l {README,CONTRIBUTING}.md
+    | tail -1 | awk '{print $1 >= 500}' && echo README and CONTRIBUTING present with substantive content
+- id: e10-s02
+  title: Design and deploy static landing page
+  acceptance_criteria:
+  - Given a prospective user visiting the BigStream site, When they land on the homepage, Then they see hero copy,
+    feature highlights, and a clear CTA to download DMG
+  - When a user clicks Install, Then they are directed to the latest GitHub release
+  - When a user clicks Learn More / Docs, Then they are directed to the README and user guide
+  - When the site is deployed to a static host (GitHub Pages or equivalent), Then it is live and accessible
+  verify: curl -s https://<landing-page-url> | grep -q 'BigStream\|Go Live\|Download' && echo Landing page deployed
+    and contains expected content
+- id: e10-s03
+  title: Full test suite verification and fix any regressions
+  acceptance_criteria:
+  - When the full test suite is run, Then all unit tests pass (Compositor golden-frame comparisons, JSONLogger output
+    validation)
+  - When StreamEngine integration tests are run against MediaMTX, Then RTMP publish, reconnect, and adaptive bitrate
+    all pass
+  - When ffprobe is run on a recorded 1-minute sample, Then duration tolerance is within spec and A/V PTS drift
+    is < 50ms
+  - When all tests pass, Then a summary report is generated showing pass count, coverage, and media-pipeline assertions
+  verify: cd /Users/danielvm/Developer/big-stream && swift test 2>&1 | grep -E '^(Test Suite|✓|passed|failed)' &&
+    echo 'All tests passed' || echo 'Tests failed — review output'
+- id: e10-s04
+  title: Manual smoke test against real unlisted YouTube broadcast
+  acceptance_criteria:
+  - Given a fresh BigStream session authenticated with a test YouTube account, When Go Live is clicked, Then the
+    app creates a broadcast, obtains ingest URL, and RTMP stream is live within 10 seconds
+  - When the stream runs for 5 minutes without user interaction, Then bitrate, fps, and dropped-frame HUD updates
+    are smooth and accurate
+  - When the user clicks End, Then the RTMP stream closes cleanly, the recording stops, and the broadcast transitions
+    to VOD on YouTube
+  - When the user visits the unlisted YouTube video link, Then video playback shows the full stream with no corruption
+    or desync
+  verify: 'manual: (1) Launch BigStream, (2) Authenticate with test YT account, (3) Pick screen + camera, (4) Click
+    Go Live, verify RTMP handshake < 10s, (5) Run 5min, watch HUD, (6) Click End, (7) Check YT page — video published
+    and plays clean'
+- id: e10-s05
+  title: 'Dogfood: announce 1.0.0 via a coding stream produced with BigStream'
+  acceptance_criteria:
+  - Given the final 1.0.0 build, When a developer streams a 30-60 minute coding session to YouTube using BigStream
+    to produce and record the stream, Then the full session is captured, the VOD is published on YouTube, and the
+    local recording is saved
+  - When the stream is live, Then chat, title, and description reference BigStream 1.0.0 and link to the landing
+    page and GitHub release
+  - When the VOD is published, Then it can be used as a demo/case-study video for BigStream's own marketing
+  - When the session ends, Then both the YouTube VOD and the local MP4 recording are preserved as release artifacts
+  verify: 'manual: (1) Stream 30-60min coding session using BigStream to YouTube, (2) Verify VOD is published and
+    plays, (3) Verify local MP4 saved, (4) Check description links to landing page, (5) Preserve both artifacts
+    for release notes'
+- id: e10-s06
+  title: Finalize and tag 1.0.0 release
+  acceptance_criteria:
+  - When the release branch is created and all previous stories are verified, Then semantic-release is run to generate
+    CHANGELOG, bump version to 1.0.0, and tag HEAD
+  - When the tag is created, Then a GitHub Release is created with release notes linking to docs, landing page,
+    and dogfood VOD
+  - When the notarized DMG is ready, Then it is attached to the GitHub Release with download instructions
+  - When the release is published, Then CI/CD ensures all tests pass and all artifacts are present
+  verify: git tag -l | grep -q '^1\.0\.0$' && gh release view 1.0.0 --json name,description,assets | jq '.assets
+    | length > 0' && echo 'Release 1.0.0 tagged and published'
+- id: e10-s07
+  title: 'Post-release: update product state and plan follow-up roadmap'
+  acceptance_criteria:
+  - When 1.0.0 is shipped, Then specs/state.yaml is updated with phase = 'released' and updated = today's date
+  - When the release is live, Then specs/release-plan.yaml is reviewed and a roadmap for 1.1.0+ (e.g. Twitch, multi-layout,
+    chat overlay) is drafted in specs/plans/
+  - When post-release metrics are collected (download count, GitHub stars, feedback from early adopters), Then a
+    post-mortem and insights doc is added to specs/archive/
+  verify: 'grep -E ''phase: released|version: 1\.0\.0'' /Users/danielvm/Developer/big-stream/specs/state.yaml &&
+    test -f /Users/danielvm/Developer/big-stream/specs/plans/ROADMAP_1_1_0.md && echo ''Release state finalized
+    and roadmap drafted'''
+risks:
+- 'Landing page design and deployment could slip if hosting infrastructure is not pre-configured; mitigation: use
+  GitHub Pages (static, no build step) as default'
+- 'YouTube smoke test requires a real test account and network; mitigation: use unlisted broadcast (non-public),
+  test offline beforehand, have rollback OAuth app ready'
+- 'Dogfood stream introduces live-action risk (network outage, app crash on video); mitigation: pre-record a session
+  as fallback, test full flow at least once before the live stream'
+- 'Documentation is never ''done''; mitigation: freeze docs at feature-complete for 1.0.0, gather user feedback
+  post-release to feed 1.1.0 docs iteration'
+- 'Media file corruption or PTS drift discovered during smoke test; mitigation: revert to e09 and re-verify StreamRecorder
+  + Compositor before re-testing'
+status: planned

@@ -1,0 +1,72 @@
+name: BigStream
+options:
+  bundleIdPrefix: com.danielvm
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    ENABLE_APP_SANDBOX: NO
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  BigStream:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Sources/App
+      - Sources/Core
+      - Sources/UI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danielvm.bigstream
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+    dependencies: []
+
+  BigStreamTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Tests/BigStreamTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danielvm.bigstreamtests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/BigStream.app/Contents/MacOS/BigStream"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: BigStream
+
+schemes:
+  BigStream:
+    build:
+      targets:
+        BigStream: all
+        BigStreamTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: BigStreamTests
+          parallelizable: true
+          randomExecutionOrder: true
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

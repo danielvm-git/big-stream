@@ -1,0 +1,35 @@
+project: big-stream
+version: 1
+date: 2026-06-12
+product: >
+  BigStream — a macOS live-streaming studio for solo developer coding streams.
+  Go live on YouTube and record locally in under 60 seconds, with zero servers
+  and no visible stream keys.
+target_user: solo developers streaming coding sessions from a Mac (macOS 14+)
+wedge: idiot-proof UX — sign in, pick screen, Go Live; StreamYard simplicity without the SaaS
+in_scope:
+  - YouTube destination via OAuth PKCE (app creates broadcast, fetches ingest, transitions live, publishes VOD)
+  - Custom RTMP URL escape hatch
+  - Sources: one Screen or Window, Camera, Mic, SystemAudio
+  - One fixed Composite layout: screen + draggable circular camera bubble
+  - Simultaneous local MP4 Recording of the Composite for every Session
+  - Live HUD: bitrate, fps, dropped frames, duration
+  - Resilience: RTMP reconnect, adaptive bitrate, recording survives publish drops
+  - Onboarding + permissions flow (Screen Recording, Camera, Mic)
+  - Signed + notarized DMG distribution; free beta
+out_of_scope_pre_1_0:
+  - Twitch / LinkedIn / multistream to >1 destination
+  - Multiple layouts, scenes, themes, brand kits, lower-thirds, banners
+  - Chat overlay, guests/multi-party, audience features
+  - Secrets-blur, auto-chapters, clip/post-stream workflow
+  - App Store distribution, payments/licensing, cloud relay
+constraints:
+  - Swift 6 strict concurrency, SwiftUI, macOS 14+
+  - Zero server-side components; local-only telemetry
+  - HaishinKit pinned 2.2.x behind StreamEngine protocol (ADR-0002)
+  - semantic-release 0.1.0 -> 1.0.0, Conventional Commits
+success_criteria:
+  - A first-time user goes from DMG install to live on YouTube in under 5 minutes, under 60 seconds on second run
+  - A 1-hour Session produces a clean MP4 (A/V drift < 50ms) and a published VOD
+  - Pulling the network mid-Session: stream reconnects, recording never stops
+  - 1.0.0 is announced via a coding stream produced by BigStream itself

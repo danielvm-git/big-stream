@@ -1,0 +1,115 @@
+id: e01
+name: walking-skeleton
+version: 0.1.0
+goal: Establish the foundational BigStream project structure with Swift 6 strict concurrency, @Observable @MainActor
+  AppState, JSONLogger actor, Swift Testing framework, XcodeGen project configuration, and CI/CD pipeline. Ship
+  semantic-release cutting 0.1.0 from Conventional Commits to enable clean iteration on future epics.
+wsjf:
+  business_value: 8
+  time_criticality: 10
+  risk_reduction: 9
+  job_size: 4
+  score: 6.75
+dependencies: []
+stories:
+- id: e01-s01
+  title: XcodeGen project.yml with Swift 6 strict concurrency
+  acceptance_criteria:
+  - Given a clean git repo, when XcodeGen generates the Xcode project from project.yml, then the target compiles
+    with SWIFT_STRICT_CONCURRENCY=complete
+  - When SWIFT_STRICT_CONCURRENCY is complete, then all warnings are treated as errors (SWIFT_TREAT_WARNINGS_AS_ERRORS=YES)
+  - When Swift 6 strict mode is active, then DispatchQueue.main.async is replaced with @MainActor, async let, or
+    structured concurrency throughout
+  - Given macOS 14+ deployment, when project is built for release, then SDK is set to latest macOS and minimum deployment
+    target is 14.0
+  verify: 'cd /Users/danielvm/Developer/big-stream && xcodegen generate && xcodebuild build -scheme BigStream -configuration
+    Release 2>&1 | grep -q ''Build complete'' && echo ''SUCCESS: XcodeGen project builds with SWIFT_STRICT_CONCURRENCY=complete'''
+- id: e01-s02
+  title: '@Observable @MainActor AppState with JSONLogger injection'
+  acceptance_criteria:
+  - Given an AppState marked @Observable @MainActor, when AppState initializes, then it injects a JSONLogger actor
+    via property or init parameter
+  - When AppState logs any lifecycle event (init, start, stop, error), then JSONLogger writes a structured JSON
+    dict to ~/Library/Logs/BigStream/app-state.log with timestamp, level, and message keys
+  - When JSONLogger writes a log, then no secrets (API keys, tokens, URLs) are logged; only event type and generic
+    context
+  - Given AppState conforms to Observable, when SwiftUI observes AppState, then @Environment(AppState.self) compiles
+    without warnings and propagates to child views
+  verify: 'cd /Users/danielvm/Developer/big-stream && xcodebuild build -scheme BigStream -configuration Debug 2>&1
+    | grep -q ''Build complete'' && grep -E ''@Observable|@MainActor|JSONLogger'' Sources/App/AppState.swift &&
+    echo ''SUCCESS: AppState is @Observable @MainActor with JSONLogger'''
+- id: e01-s03
+  title: JSONLogger actor for structured local-only logging
+  acceptance_criteria:
+  - 'Given a JSONLogger actor, when a caller invokes logger.log(level:message:context:), then the actor appends
+    a JSON object to the log file with keys: timestamp (ISO 8601), level (string), message, context (dict), and
+    pid'
+  - When the log file exceeds 50 MB, then JSONLogger rotates to a .1 suffix and starts a new file
+  - When JSONLogger initializes, then it creates ~/Library/Logs/BigStream/ if missing and never throws; partial
+    writes are safe (no force unwrap)
+  - When a second caller tries to write while a rotation is in progress, then the write queues and waits; no data
+    loss or corruption
+  verify: 'cd /Users/danielvm/Developer/big-stream && xcodebuild build -scheme BigStreamTests -configuration Debug
+    2>&1 | grep -q ''Build complete'' && xcodebuild test -scheme BigStreamTests -configuration Debug 2>&1 | grep
+    -c ''Test Suite BigStreamTests'' && echo ''SUCCESS: JSONLogger actor tests pass'''
+- id: e01-s04
+  title: Swift Testing framework target with one passing test
+  acceptance_criteria:
+  - Given a Swift Testing test target (not XCTest), when the target runs, then one @Test func passes without errors
+  - When the test passes, then the output shows Test Suite success and zero failures
+  - 'When Swift Testing is imported, then #expect() assertions compile and work (no custom XCTestCase subclasses)'
+  - Given the test is a golden-baseline for future epics, when it tests AppState initialization, then it verifies
+    @Observable and @MainActor are correctly applied
+  verify: 'cd /Users/danielvm/Developer/big-stream && xcodebuild test -scheme BigStreamTests -configuration Debug
+    -testPlan BigStreamTests 2>&1 | grep -E ''Test Session|passed|failed'' && echo ''SUCCESS: Swift Testing target
+    has one passing test'''
+- id: e01-s05
+  title: SwiftLint config + pre-commit hooks (commitlint, swiftlint, tests)
+  acceptance_criteria:
+  - Given a .swiftlint.yml in the repo root, when swiftlint lint is run, then it passes with no violations (or configured
+    allowed exceptions)
+  - 'When a commit is attempted, then pre-commit hooks run in order: commitlint (Conventional Commits check), swiftlint,
+    swift test'
+  - When any hook fails, then the commit is rejected and the developer sees which hook failed and why
+  - When a commit message is non-conventional (not feat:, fix:, docs:, test:, refactor:, chore:, BREAKING CHANGE),
+    then commitlint rejects it and suggests the correct format
+  verify: 'cd /Users/danielvm/Developer/big-stream && [ -f .swiftlint.yml ] && swiftlint lint 2>&1 | tail -1 &&
+    [ -d .git/hooks ] && [ -x .git/hooks/pre-commit ] && echo ''SUCCESS: SwiftLint config and pre-commit hooks are
+    in place'''
+- id: e01-s06
+  title: 'GitHub Actions CI: build, test, and lint on every push and PR'
+  acceptance_criteria:
+  - Given a .github/workflows/ci.yml, when a push or PR is opened, then GitHub Actions runs build (xcodebuild build),
+    test (xcodebuild test), and lint (swiftlint) in parallel
+  - When all checks pass, then the PR is eligible to merge (required status check)
+  - When lint or tests fail, then the workflow fails and the developer is notified via PR status
+  - When the CI runs on main, then a passing build does NOT trigger a release; releases only happen via explicit
+    semantic-release trigger or merge to main with Conventional Commits
+  verify: 'cd /Users/danielvm/Developer/big-stream && [ -f .github/workflows/ci.yml ] && grep -q ''xcodebuild build''
+    .github/workflows/ci.yml && grep -q ''xcodebuild test'' .github/workflows/ci.yml && echo ''SUCCESS: GitHub Actions
+    CI workflow is configured'''
+- id: e01-s07
+  title: semantic-release config and 0.1.0 tag cut from Conventional Commits
+  acceptance_criteria:
+  - 'Given a .releaserc.json or .releaserc.yaml, when semantic-release is run on a commit history with feat: and
+    fix: messages, then it calculates the next version correctly (0.1.0 for first release)'
+  - When semantic-release is triggered, then it creates a git tag (e.g., v0.1.0), generates a CHANGELOG.md with
+    commit history, and updates package.json version
+  - 'When a feat: commit is merged to main, then semantic-release automatically cuts a minor release (0.x.0)'
+  - When semantic-release runs in CI, then the GitHub Actions workflow creates the tag and CHANGELOG without requiring
+    manual approval; the workflow is idempotent (running twice does not double-tag)
+  verify: 'cd /Users/danielvm/Developer/big-stream && [ -f .releaserc.json ] || [ -f .releaserc.yaml ] && grep -q
+    ''semantic-release\|release'' .github/workflows/ci.yml && git describe --tags 2>/dev/null | grep -q ''v0.1.0''
+    && echo ''SUCCESS: semantic-release config exists and 0.1.0 tag is cut'''
+risks:
+- 'Swift 6 strict concurrency adoption may surface hidden concurrency bugs in third-party dependencies; mitigation:
+  isolate HaishinKit behind StreamEngine actor boundary (ADR-0002)'
+- 'XcodeGen maintenance burden if project structure changes frequently; mitigation: version control project.yml,
+  document generation steps in README'
+- 'JSONLogger actor contention under high-frequency logging; mitigation: use async/await, buffer writes, test with
+  synthetic load'
+- 'Pre-commit hooks slowing down fast iterations; mitigation: make hooks fast (lint only changed files), provide
+  bypass for CI (GH Actions runs same checks)'
+- 'semantic-release requires exact Conventional Commits discipline across team; mitigation: commit template, pre-commit
+  validation, clear CONVENTIONS.md'
+status: built

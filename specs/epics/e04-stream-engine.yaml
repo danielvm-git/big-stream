@@ -1,0 +1,92 @@
+id: e04
+name: stream-engine
+version: 0.4.0
+goal: Publish externally-composited CMSampleBuffers (screen + camera bubble composite, plus mic and system audio)
+  to a custom RTMP/RTMPS Destination via a StreamEngine actor protocol backed by a HaishinKit 2.2.x adapter. HaishinKit
+  imports are confined to Core/StreamEngine/. The mixer runs in pass-through mode (videoMixerSettings.mode = .passThrough)
+  with multi-track audio (mic track 0, system audio track 1). PTS is driven from each buffer's presentation time,
+  SCK .idle/.blank frames are filtered before append, and a MediaMTX docker sink proves a real publish end to end.
+  A fake StreamEngine enables fast unit tests, and Google OAuth verification paperwork is kicked off in parallel
+  so review is not the critical path at 0.6.0.
+wsjf:
+  business_value: 9
+  time_criticality: 7
+  risk_reduction: 9
+  job_size: 5
+  score: 5
+dependencies:
+- e03
+stories:
+- id: e04-s01
+  title: StreamEngine actor protocol + FakeStreamEngine for tests
+  acceptance_criteria:
+  - 'Given the Core/StreamEngine module When the protocol is defined Then StreamEngine is an actor-isolated protocol
+    exposing start(to: CustomRTMPDestination), append(_ sample: CMSampleBuffer, track: AudioTrack?), stop(), and
+    a readyState AsyncStream, with no HaishinKit symbol in its signatures'
+  - Given a unit test target When it imports Core Then a FakeStreamEngine conforming to StreamEngine records appended
+    buffers and emits scripted readyState transitions without any HaishinKit dependency
+  - Given Swift 6 strict concurrency When the package builds Then there are no data-race or Sendable warnings for
+    StreamEngine or its fake
+  verify: swift build -Xswiftc -strict-concurrency=complete && swift test --filter StreamEngineProtocolTests
+- id: e04-s02
+  title: 'HaishinKit adapter: pass-through mixer + multi-track audio wiring'
+  acceptance_criteria:
+  - Given HaishinKitStreamEngine in Core/StreamEngine/ When it configures MediaMixer Then videoMixerSettings.mode
+    is .passThrough and multiTrackAudioMixingEnabled is true
+  - Given a composited video buffer and audio buffers When append is called Then video and mic (track 0) and system
+    audio (track 1) are routed to mixer.append with correct track indices
+  - Given the import-confinement rule When the codebase is grepped Then `import HaishinKit` appears only under Core/StreamEngine/
+  verify: swift test --filter HaishinKitAdapterTests && test -z "$(grep -rl 'import HaishinKit' Sources --include='*.swift'
+    | grep -v 'Core/StreamEngine/')"
+- id: e04-s03
+  title: PTS discipline + SCK idle/blank frame filtering at the append boundary
+  acceptance_criteria:
+  - Given a CMSampleBuffer When it is appended Then the presentation timestamp passed downstream equals CMSampleBufferGetPresentationTimeStamp,
+    never wall-clock time
+  - Given an SCK frame whose SCStreamFrameInfo status is .idle or .blank When it reaches the engine Then it is dropped
+    before mixer.append and counted via JSONLogger
+  - Given a sequence of valid frames When appended Then output PTS values are monotonically non-decreasing
+  verify: swift test --filter PTSDisciplineTests
+- id: e04-s04
+  title: RTMP/RTMPS publish to a CustomRTMPDestination via StreamSession
+  acceptance_criteria:
+  - Given a CustomRTMPDestination with url and stream key When start is called Then a StreamSession connects and
+    the readyState AsyncStream emits .publishing
+  - Given an rtmps:// destination url When start is called Then the TLS connection is established and publish succeeds
+  - Given an invalid host When start is called Then start surfaces a typed StreamEngineError and readyState emits
+    .failed without crashing
+  verify: swift test --filter RTMPPublishTests
+- id: e04-s05
+  title: 'MediaMTX docker integration test: publish 5s synthetic frames + ffprobe assertions'
+  acceptance_criteria:
+  - Given MediaMTX running in docker locally/CI When the test publishes ~5s of synthetic composited frames Then
+    MediaMTX reports an active incoming stream on the path
+  - Given the published stream When ffprobe inspects the RTMP path Then codec is h264 for video and aac for audio,
+    resolution and fps match the composite settings within tolerance
+  - Given no docker available When the test runs Then it skips with a clear reason rather than failing
+  verify: docker compose -f Tests/Integration/mediamtx-compose.yml up -d && swift test --filter MediaMTXPublishIntegrationTests;
+    docker compose -f Tests/Integration/mediamtx-compose.yml down
+- id: e04-s06
+  title: Kick off Google OAuth app verification paperwork (parallel, manual)
+  acceptance_criteria:
+  - Given the Google Cloud project When the OAuth consent screen is configured Then scopes (youtube + youtube.force-ssl),
+    app name, support email, and homepage/privacy URLs are submitted for verification
+  - Given verification is in progress When status is captured Then the submission reference, requested scopes, and
+    expected review window are recorded in specs/ for the 0.6.0 slice
+  - Given the paperwork When this story closes Then no automated test touches live Google APIs (verification is
+    tracked manually only)
+  verify: 'manual: confirm Google OAuth verification submitted (consent screen + youtube.force-ssl scope), submission
+    reference and status recorded in specs/state.yaml or specs/requirements/, screenshot of ''in review'' status
+    attached'
+risks:
+- MediaMTX/docker unavailable on CI runners makes e04-s05 flaky; mitigate with skip-on-no-docker and pin the MediaMTX
+  image tag
+- HaishinKit 2.2.x API drift or the known mamimumVideoBitrate typo could break the adapter; mitigate by pinning
+  the exact version and confining imports to Core/StreamEngine/
+- SCK .idle/.blank frames or wall-clock PTS leaking through cause A/V drift or stalls downstream (e05 recording);
+  covered by e04-s03 but needs the e05 ffprobe drift gate to fully confirm
+- Google OAuth verification can take weeks and may request more info; starting at 0.4.0 de-risks 0.6.0 but timing
+  is outside our control
+- Multi-track audio mapping (mic=0, system=1) depends on multiTrackAudioMixingEnabled behavior; wrong track indices
+  silently drop or swap audio — assert per-track routing in e04-s02
+status: planned

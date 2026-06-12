@@ -1,0 +1,31 @@
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - build
+  - .build
+  - specs
+
+identifier_name:
+  min_length: 2
+  allowed_symbols: "_"
+
+line_length:
+  warning: 140
+  error: 180
+
+opt_in_rules:
+  - closure_spacing
+  - empty_count
+  - explicit_init
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - legacy_random
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - strict_fileprivate
+  - trailing_closure
+  - unneeded_parentheses_in_closure_argument

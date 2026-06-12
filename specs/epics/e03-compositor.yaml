@@ -1,0 +1,104 @@
+id: e03
+name: compositor
+version: 0.3.0
+goal: Implement the Core Image/Metal compositor pipeline that blends a full-screen capture with a circular camera
+  bubble overlay into a single composite CMSampleBuffer, expose a draggable bubble preview in SwiftUI, and validate
+  correctness with deterministic golden-frame CI tests.
+wsjf:
+  business_value: 9
+  time_criticality: 7
+  risk_reduction: 8
+  job_size: 7
+  score: 3.43
+dependencies:
+- e02
+stories:
+- id: e03-s01
+  title: Define Compositor actor interface and CMSampleBuffer pipeline skeleton
+  acceptance_criteria:
+  - Given the project builds with Swift 6 strict concurrency, When Compositor is compiled, Then no sendability or
+    data-race warnings appear
+  - Given a Compositor instance, When feed(screen:camera:) is called with two CMSampleBuffers, Then it returns a
+    non-nil composite CMSampleBuffer without throwing
+  - Given the Compositor interface, When AppState injects it as a dependency, Then CaptureService output can be
+    wired to Compositor.feed without bridging casts
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CompositorTests/testSkeletonCompiles 2>&1
+    | grep -E 'Test Suite.*passed'
+- id: e03-s02
+  title: Implement Core Image circular-mask camera bubble composited over full-screen frame
+  acceptance_criteria:
+  - Given a screen CVPixelBuffer and a camera CVPixelBuffer, When Compositor.feed() runs, Then the output pixel
+    buffer contains screen content with a circle of camera content inset in the bottom-right corner
+  - Given the camera region in the output, When pixels outside the bubble radius are sampled, Then they match the
+    underlying screen content (alpha blended, not black)
+  - Given a 1920x1080 screen input and a 1280x720 camera input, When composited, Then the output dimensions are
+    exactly 1920x1080
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CompositorTests/testCircularBubbleRegion
+    2>&1 | grep -E 'Test Suite.*passed'
+- id: e03-s03
+  title: 'Preserve CMSampleBuffer timing: output PTS driven from screen buffer presentation time'
+  acceptance_criteria:
+  - Given two input CMSampleBuffers with distinct presentation timestamps, When Compositor produces the composite,
+    Then the output CMSampleBufferGetPresentationTimeStamp equals the screen buffer PTS
+  - Given consecutive composited frames, When PTS values are compared, Then they are strictly monotonically increasing
+  - Given a .idle or .blank SCK frame (all-black or flagged), When fed to the compositor, Then the frame is filtered
+    and feed() returns nil rather than forwarding garbage
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CompositorTests/testPTSPreservation,BigStreamTests/CompositorTests/testIdleFrameFiltered
+    2>&1 | grep -E 'Test Suite.*passed'
+- id: e03-s04
+  title: Golden-frame CI tests with deterministic synthetic inputs and stored reference images
+  acceptance_criteria:
+  - Given a synthetic 1920x1080 SMPTE color-bar CVPixelBuffer as screen and a solid red 640x640 CVPixelBuffer as
+    camera, When one frame is composited and rendered to a CGImage, Then pixel-level comparison to the stored reference
+    PNG passes with a per-channel tolerance of 2/255
+  - Given the reference PNG does not exist, When tests run with GENERATE_GOLDEN=1, Then the reference is written
+    to Tests/Resources/Goldens/ and the test is skipped (not failed)
+  - Given the reference PNG exists and compositing parameters are unchanged, When tests run in CI without GENERATE_GOLDEN,
+    Then the golden comparison test passes deterministically
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/CompositorTests/testGoldenFrame 2>&1 |
+    grep -E 'Test Suite.*passed'
+- id: e03-s05
+  title: 'Bubble position state: corner default with draggable offset persisted in AppState'
+  acceptance_criteria:
+  - Given the app launches fresh, When AppState is initialized, Then bubblePosition defaults to .bottomTrailing
+    with zero drag offset
+  - Given a user drag gesture on the bubble in preview, When the drag ends, Then the new CGPoint offset is stored
+    in AppState.bubbleOffset and survives view re-renders
+  - Given a stored bubbleOffset, When Compositor.feed() is called, Then the composite frame places the camera bubble
+    at the stored offset rather than the default corner
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamTests/AppStateTests/testBubblePositionDefault,BigStreamTests/AppStateTests/testBubbleOffsetPersists
+    2>&1 | grep -E 'Test Suite.*passed'
+- id: e03-s06
+  title: Composite preview SwiftUI view with live frame display and drag-to-reposition bubble
+  acceptance_criteria:
+  - Given the app is running and CaptureService is active, When CompositePreviewView appears, Then it renders live
+    composited frames at the captured frame rate with no UI thread blocking
+  - Given CompositePreviewView is displayed, When the user drags the camera bubble overlay, Then a DragGesture updates
+    AppState.bubbleOffset in real time and the next composited frame reflects the new position
+  - Given CaptureService is stopped, When CompositePreviewView is shown, Then a placeholder graphic is displayed
+    instead of a blank black frame
+  verify: 'manual: launch app, start capture, confirm live preview renders in CompositePreviewView; drag bubble
+    to new corner; stop capture, confirm placeholder appears'
+- id: e03-s07
+  title: Wire Compositor output into StreamEngine mixer.append path
+  acceptance_criteria:
+  - Given Compositor is producing composite CMSampleBuffers, When StreamEngine is in .idle readyState, Then calling
+    mixer.append() with a composited buffer does not throw and videoMixerSettings.mode is confirmed .passThrough
+  - Given a short integration test session with MediaMTX docker sink, When 60 composite frames are fed through StreamEngine,
+    Then ffprobe on the received stream reports video codec h264 and no frame discontinuities greater than 2x the
+    nominal frame interval
+  - Given the wiring is complete, When the app transitions Go Live, Then composited frames (not raw screen frames)
+    are what StreamEngine forwards to the RTMP destination
+  verify: xcodebuild test -scheme BigStream -only-testing BigStreamIntegrationTests/StreamEngineTests/testCompositorPassThroughFrames
+    2>&1 | grep -E 'Test Suite.*passed'
+risks:
+- Core Image CIFilter circular crop and compositing on macOS may produce subtle anti-aliasing differences between
+  Apple Silicon and Intel CI runners, causing golden-frame comparisons to fail unless tolerance is tuned per-architecture
+  or rendering is forced to Metal path explicitly.
+- CMSampleBuffer ownership and copy semantics across actor boundaries require careful use of CMSampleBufferCreateCopy
+  to avoid use-after-free when screen capture delivers buffers with short lifetimes.
+- HaishinKit mixer.append() expects pixel format kCVPixelFormatType_32BGRA; if Core Image outputs a different format
+  the passThrough path will silently drop frames — a format assertion in the wiring layer is essential.
+- Draggable bubble offset stored only in AppState memory will reset on app relaunch; deferring persistence to UserDefaults
+  is out of scope for this epic but should be tracked as a follow-on.
+status: planned

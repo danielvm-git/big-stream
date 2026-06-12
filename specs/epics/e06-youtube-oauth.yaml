@@ -1,0 +1,110 @@
+id: e06
+name: youtube-oauth
+version: 0.6.0
+goal: 'YouTubeService becomes a first-class YouTubeDestination: authenticate the user via OAuth 2.0 PKCE (loopback
+  redirect), persist tokens securely in the Keychain with silent refresh, and drive the full YouTube Live Streaming
+  API lifecycle — create liveBroadcast + liveStream, bind them, fetch ingest URL + key invisibly, transition testing
+  -> live -> complete, and publish the VOD — all without the user ever seeing or pasting a stream key. Validated
+  by URLProtocol-stubbed unit tests and a manual smoke checklist against an unlisted broadcast.'
+wsjf:
+  business_value: 9
+  time_criticality: 7
+  risk_reduction: 8
+  job_size: 5
+  score: 4.8
+dependencies:
+- e04
+stories:
+- id: e06-s01
+  title: OAuth 2.0 PKCE flow with loopback redirect via ASWebAuthenticationSession
+  acceptance_criteria:
+  - Given a user with no stored YouTube credentials, When they trigger Connect YouTube, Then ASWebAuthenticationSession
+    opens the Google consent screen with a PKCE code_challenge (S256) and an ephemeral loopback redirect URI (http://127.0.0.1:<port>/)
+    listened on a transient local port
+  - Given the user approves consent, When Google redirects to the loopback URI with an authorization code, Then
+    YouTubeService exchanges code + code_verifier for an access_token and refresh_token over a timeout-bounded request
+    and the local listener shuts down immediately
+  - Given the user denies consent or the auth window is cancelled, When the flow returns an error or empty code,
+    Then YouTubeService surfaces a typed connect-failed error, logs the event via JSONLogger, and stores nothing
+  - Given the requested scope, When consent is requested, Then it requests only youtube and youtube.upload (no broader
+    Google scopes) and treats the desktop client_secret as public per ADR-0003
+  verify: swift test --filter OAuthPKCEFlowTests
+- id: e06-s02
+  title: Token storage in Keychain with timeout-bounded silent refresh
+  acceptance_criteria:
+  - Given a successful OAuth exchange, When tokens are persisted, Then access_token, refresh_token, and expiry are
+    written to the macOS Keychain (not UserDefaults, not files) and never logged in plaintext by JSONLogger
+  - Given a stored access_token within ~60s of expiry, When any YouTubeService API call begins, Then the token is
+    refreshed first using the refresh_token over a timeout-bounded request before the call proceeds
+  - Given a refresh_token rejected by Google (invalid_grant), When refresh is attempted, Then stored credentials
+    are cleared, the user is surfaced a re-connect-required state, and the failure is logged without leaking token
+    material
+  - Given transient refresh failures (5xx/network), When refresh is attempted, Then it retries with backoff per
+    the Retry-with-backoff defensive category before giving up
+  verify: swift test --filter KeychainTokenStoreTests --filter TokenRefreshTests
+- id: e06-s03
+  title: Create + bind liveBroadcast and liveStream, fetch ingest URL+key invisibly
+  acceptance_criteria:
+  - Given an authenticated user starting a Session, When createDestination is called, Then YouTubeService inserts
+    a liveBroadcast (with title, unlisted privacy, scheduled start) and a liveStream (RTMP, 1080p), binds the stream
+    to the broadcast, and returns an opaque ingest descriptor (URL + key) to StreamEngine
+  - Given the ingest descriptor, When it crosses any boundary toward the UI, Then the stream key is never exposed
+    to the view layer and never written to JSONLogger; only a redacted form (e.g. last-4 or none) may appear in
+    diagnostics
+  - Given the YouTube API returns a quota or auth error during create/bind, When the calls run, Then YouTubeService
+    raises a typed error mapped from the API reason and the Session does not start the publish
+  - Given the create/bind sequence, When requests are issued, Then each is timeout-bounded and HTTPS-only against
+    the URLProtocol-stubbed endpoints
+  verify: swift test --filter LiveBroadcastCreateBindTests
+- id: e06-s04
+  title: Broadcast lifecycle transitions testing -> live -> complete with VOD publish
+  acceptance_criteria:
+  - Given a bound broadcast and an RTMP stream the YouTube ingest reports as active, When the user Goes Live, Then
+    YouTubeService transitions the broadcast testing -> live, polling streamStatus until ingest is active before
+    requesting the live transition
+  - Given a live broadcast, When the user Ends the Session, Then YouTubeService transitions the broadcast to complete
+    and the resulting VOD is published according to the broadcast privacy (unlisted for smoke)
+  - Given a transition rejected because the precondition is not met (e.g. redundant transition / not active), When
+    the transition is attempted, Then the error reason is mapped, logged, and retried or surfaced rather than crashing,
+    and the Recording is unaffected per the never-stop-recording rule
+  - Given the publish path, When the YouTube destination drops mid-Session, Then per the circuit-breaker category
+    the publish attempts stop and the user is told while the local Recording continues
+  verify: swift test --filter BroadcastLifecycleTests
+- id: e06-s05
+  title: Quota awareness and typed YouTube API error mapping
+  acceptance_criteria:
+  - Given the YouTube Data API quota model, When a call returns 403 quotaExceeded or rateLimitExceeded, Then YouTubeService
+    maps it to a typed quota error, logs it via JSONLogger, and surfaces a user-facing degraded state rather than
+    a generic failure
+  - Given create/bind/transition uses costly write quota, When a Session runs, Then the implementation avoids redundant
+    list/poll calls (bounded poll interval) to stay within daily quota and documents per-call quota cost in code
+    comments
+  - Given any 4xx/5xx from Google, When decoded, Then the error.errors[].reason is parsed into the typed error taxonomy
+    and unknown reasons fall back to a safe generic-API error
+  verify: swift test --filter YouTubeQuotaErrorMappingTests
+- id: e06-s06
+  title: Manual smoke checklist against an unlisted broadcast
+  acceptance_criteria:
+  - Given a real Google account with a temporary rotated key, When the operator follows specs/checklists/e06-youtube-smoke.md
+    end to end, Then connect, create+bind, Go Live (testing->live), watch the unlisted broadcast play, End (->complete),
+    and confirm the published VOD all pass
+  - Given the smoke run, When credentials appear on a recorded/streamed session, Then they are temporary and rotated
+    immediately after per the streaming-the-development rule
+  - Given the checklist, When stored, Then it explicitly forbids any automated test path against live YouTube per
+    ADR-0003
+  verify: 'manual: follow specs/checklists/e06-youtube-smoke.md against an unlisted broadcast end-to-end; check
+    off connect, create+bind, testing->live, playback, ->complete, VOD published'
+risks:
+- Google OAuth app verification may not be approved before 0.6.0 needs it (ADR-0003 starts verification ~0.4.0);
+  slippage blocks real-account smoke testing
+- Desktop client_secret ships in the binary and is public; PKCE mitigates but a leaked/abused client_id could draw
+  Google rate-limiting or suspension
+- YouTube Data API write quota is tight; create+bind+transition per Session plus polling can exhaust the default
+  daily quota during development without caching/bounded polls
+- liveStream ingest can take seconds-to-minutes to report active; premature testing->live transitions fail and need
+  robust polling with timeout, risking a poor Go Live experience
+- No automated coverage against live YouTube means lifecycle/transition regressions can only be caught by the manual
+  smoke checklist, which can drift from the stubbed unit tests
+- Keychain access prompts or ACL issues on macOS could block silent refresh; mishandling invalid_grant could silently
+  log the user out mid-Session
+status: planned

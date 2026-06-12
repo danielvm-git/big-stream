@@ -1,0 +1,120 @@
+project: big-stream
+version: 1
+date: '2026-06-12'
+source_scope: specs/requirements/SCOPE_LATEST.yaml
+release_goal: 'BigStream 1.0.0 MVP: go live on YouTube and record locally in under 60 seconds, zero servers, no
+  visible stream keys.'
+versioning: semantic-release from Conventional Commits; one epic per minor version
+epics:
+- id: e01
+  name: walking-skeleton
+  version: 0.1.0
+  wsjf_score: 6.75
+  dependencies: []
+  stories: 7
+  goal: Establish the foundational BigStream project structure with Swift 6 strict concurrency, @Observable @MainActor
+    AppState, JSONLogger actor, Swift Testing framewo...
+  shard: specs/epics/e01-walking-skeleton.yaml
+  status: built
+- id: e02
+  name: capture
+  version: 0.2.0
+  wsjf_score: 3.71
+  dependencies:
+  - e01
+  stories: 7
+  goal: Implement CaptureService actor with SCContentSharingPicker for screen/window selection, AVCaptureDevice
+    for camera and mic, SCK system audio tap, a full permiss...
+  shard: specs/epics/e02-capture.yaml
+  status: planned
+- id: e03
+  name: compositor
+  version: 0.3.0
+  wsjf_score: 3.43
+  dependencies:
+  - e02
+  stories: 7
+  goal: Implement the Core Image/Metal compositor pipeline that blends a full-screen capture with a circular camera
+    bubble overlay into a single composite CMSampleBuffe...
+  shard: specs/epics/e03-compositor.yaml
+  status: planned
+- id: e04
+  name: stream-engine
+  version: 0.4.0
+  wsjf_score: 5
+  dependencies:
+  - e03
+  stories: 6
+  goal: Publish externally-composited CMSampleBuffers (screen + camera bubble composite, plus mic and system audio)
+    to a custom RTMP/RTMPS Destination via a StreamEngin...
+  shard: specs/epics/e04-stream-engine.yaml
+  status: planned
+- id: e05
+  name: recording
+  version: 0.5.0
+  wsjf_score: 4.2
+  dependencies:
+  - e04
+  stories: 7
+  goal: Deliver local MP4 recording via HaishinKit StreamRecorder as a second MediaMixer output, sharing the same
+    composite as publish, with a record-only mode, recordi...
+  shard: specs/epics/e05-recording.yaml
+  status: planned
+- id: e06
+  name: youtube-oauth
+  version: 0.6.0
+  wsjf_score: 4.8
+  dependencies:
+  - e04
+  stories: 6
+  goal: 'YouTubeService becomes a first-class YouTubeDestination: authenticate the user via OAuth 2.0 PKCE (loopback
+    redirect), persist tokens securely in the Keychain w...'
+  shard: specs/epics/e06-youtube-oauth.yaml
+  status: planned
+- id: e07
+  name: golive-ux
+  version: 0.7.0
+  wsjf_score: 3.71
+  dependencies:
+  - e05
+  - e06
+  stories: 7
+  goal: 'Deliver a 60-second idiot-proof Go Live flow: Show setup persisted to disk, a single Go Live button that
+    orchestrates YouTubeService + StreamEngine + Recorder i...'
+  shard: specs/epics/e07-golive-ux.yaml
+  status: planned
+- id: e08
+  name: resilience
+  version: 0.8.0
+  wsjf_score: 4.6
+  dependencies:
+  - e07
+  stories: 7
+  goal: 'A live Session survives transient network and destination failures without losing the local Recording:
+    StreamSession reconnects with bounded backoff, the encode...'
+  shard: specs/epics/e08-resilience.yaml
+  status: planned
+- id: e09
+  name: polish-distribution
+  version: 0.9.0
+  wsjf_score: 3.43
+  dependencies:
+  - e08
+  stories: 7
+  goal: Ship a notarized, installer-ready BigStream DMG with a first-run onboarding walkthrough, Developer ID signing,
+    and a lightweight update-check link — so a strang...
+  shard: specs/epics/e09-polish-distribution.yaml
+  status: planned
+- id: e10
+  name: mvp-release
+  version: 1.0.0
+  wsjf_score: 3.86
+  dependencies:
+  - e09
+  stories: 7
+  goal: 'Complete and ship BigStream 1.0.0: comprehensive user documentation, static landing page, full test suite
+    verification, manual smoke testing against live YouTub...'
+  shard: specs/epics/e10-mvp-release.yaml
+  status: planned
+order_note: Execution order follows the dependency chain e01->e10 (one epic per minor release); WSJF recorded per
+  epic for change-request reprioritization within that constraint.

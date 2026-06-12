@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# commit-msg hook: Enforce Conventional Commits format
+# Accepts: feat|fix|docs|test|refactor|chore|perf|ci|build|style(scope)?: message
+# Also allows Merge and Revert prefixes
+
+COMMIT_MSG_FILE="$1"
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    echo "Error: commit message file not found: $COMMIT_MSG_FILE" >&2
+    exit 1
+fi
+
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Remove leading/trailing whitespace and get first line only
+FIRST_LINE=$(echo "$COMMIT_MSG" | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+# Allow Merge and Revert prefixes (Git creates these automatically)
+if echo "$FIRST_LINE" | grep -q "^Merge\|^Revert"; then
+    exit 0
+fi
+
+# Pattern: type(optional-scope)optional-!: message
+# type: one of feat, fix, docs, test, refactor, chore, perf, ci, build, style
+if ! echo "$FIRST_LINE" | grep -qE "^(feat|fix|docs|test|refactor|chore|perf|ci|build|style)(\([^)]+\))?!?: .+"; then
+    echo "Invalid commit message format:" >&2
+    echo "$FIRST_LINE" >&2
+    echo "" >&2
+    echo "Expected format:" >&2
+    echo "  feat(scope): short description" >&2
+    echo "  fix: short description" >&2
+    echo "  docs(api): update API documentation" >&2
+    echo "" >&2
+    echo "Valid types: feat, fix, docs, test, refactor, chore, perf, ci, build, style" >&2
+    echo "Scope is optional. Use ! before : for breaking changes." >&2
+    exit 1
+fi
+
+exit 0
