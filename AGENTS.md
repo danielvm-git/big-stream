@@ -1,4 +1,4 @@
-# BigStream — OpenCode
+# BigStream — AI Agents
 
 Read CONVENTIONS.md before any GitHub or git operation.
 
