@@ -1,6 +1,17 @@
 project: big-stream
-phase: build # e01 built on feat/e01-walking-skeleton; next: release-branch e01, then e02 capture
+phase: build
 updated: 2026-06-12
+active_flow: build_epic
+active_epic_id: e02
+active_story_id: e02-s01
+epic_cycle:
+  step: 3
+  story_id: e02-s01
+  story_bcps: 3
+metrics:
+  story_start: "2026-06-12T17:01:11-03:00"
+git:
+  branch: feat/e02-capture
 planning_artifacts:
   scope: specs/requirements/SCOPE_LATEST.yaml
   release_plan: specs/release-plan.yaml
@@ -26,4 +37,5 @@ release_ladder:
   - {version: 0.8.0, slice: resilience — reconnect, adaptive bitrate, settings persistence}
   - {version: 0.9.0, slice: polish — onboarding, permissions flow, signed+notarized DMG}
   - {version: 1.0.0, slice: MVP — docs, landing page, dogfood stream}
-next: scope-work (specs/requirements/SCOPE_LATEST.yaml), then plan-release
+handoff:
+  next_skill: develop-tdd

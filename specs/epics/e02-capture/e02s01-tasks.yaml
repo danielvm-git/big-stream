@@ -1,0 +1,13 @@
+story_id: e02s01
+title: "PermissionsService: request and observe Screen Recording, Camera, and Mic authorizations with graceful denial handling"
+status: todo
+bcps: 3
+tasks:
+  - id: 1
+    description: "Implement PermissionsService with dependency injection for system checks"
+    verify: "xcodegen generate && xcodebuild build -scheme BigStream"
+    status: todo
+  - id: 2
+    description: "Write PermissionsServiceTests with mock verification of all permission flows (granted, partially denied, deep links)"
+    verify: "xcodebuild test -scheme BigStream -only-testing BigStreamTests/PermissionsServiceTests"
+    status: todo
